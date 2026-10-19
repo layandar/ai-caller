@@ -1,0 +1,4 @@
+.env
+audio_cache/
+data/employees.json
+__pycache__/

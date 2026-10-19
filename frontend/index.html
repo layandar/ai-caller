@@ -1,0 +1,325 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI Caller</title>
+<style>
+  :root {
+    --bg: #f4f5f7; --panel: #ffffff; --line: #e3e5ea; --text: #16181d; --muted: #6b7280;
+    --accent: #2563eb; --accent-ink: #ffffff; --ok: #15803d; --warn: #b45309; --bad: #b91c1c;
+    --ai: #eef2ff; --human: #ecfdf5; --sys: #f3f4f6;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #0f1115; --panel: #171a21; --line: #272b35; --text: #e7e9ee; --muted: #9aa1ad;
+            --accent: #3b82f6; --ai: #1e2540; --human: #11291f; --sys: #1c1f27; color-scheme: dark; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.45 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background: var(--bg); color: var(--text); }
+  header { display: flex; align-items: center; gap: 16px; padding: 14px 24px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  header h1 { font-size: 17px; margin: 0; font-weight: 650; }
+  .pipeline { display: flex; gap: 6px; flex-wrap: wrap; margin-left: auto; font-size: 12px; color: var(--muted); }
+  .pill { padding: 3px 9px; border-radius: 999px; border: 1px solid var(--line); background: var(--sys); display: flex; align-items: center; gap: 6px; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
+  .dot.on { background: var(--ok); } .dot.off { background: var(--bad); }
+  main { display: grid; grid-template-columns: 300px 1fr 380px; gap: 16px; padding: 16px 24px; max-width: 1500px; margin: 0 auto; }
+  @media (max-width: 1100px) { main { grid-template-columns: 1fr; } }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
+  .panel h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 12px; font-weight: 600; }
+  input, textarea, select, button { font: inherit; color: inherit; }
+  input, textarea, select { width: 100%; padding: 9px 11px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
+  textarea { resize: vertical; min-height: 90px; }
+  label { display: block; font-size: 12px; color: var(--muted); margin: 12px 0 5px; }
+  .people { list-style: none; margin: 10px 0 0; padding: 0; max-height: 60vh; overflow: auto; }
+  .people li { padding: 10px 12px; border-radius: 8px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  .people li:hover { background: var(--sys); }
+  .people li.active { background: var(--ai); outline: 1px solid var(--accent); }
+  .people .name { font-weight: 600; } .people .sub { font-size: 12px; color: var(--muted); }
+  .people .x { color: var(--muted); font-size: 12px; border: 0; background: none; cursor: pointer; padding: 2px 6px; }
+  .people .x:hover { color: var(--bad); }
+  .toggle { display: flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .toggle button { flex: 1; padding: 9px; border: 0; background: var(--bg); cursor: pointer; }
+  .toggle button.active { background: var(--accent); color: var(--accent-ink); }
+  .row { display: flex; gap: 10px; } .row > * { flex: 1; }
+  .btn { padding: 10px 16px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); cursor: pointer; font-weight: 600; }
+  .btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  .btn:disabled { opacity: .5; cursor: not-allowed; }
+  .actions { display: flex; gap: 10px; margin-top: 14px; align-items: center; flex-wrap: wrap; }
+  .hint { font-size: 12px; color: var(--muted); }
+  .target { padding: 12px; border-radius: 8px; background: var(--sys); margin-bottom: 4px; }
+  .target .name { font-weight: 650; font-size: 15px; }
+  details summary { cursor: pointer; color: var(--muted); font-size: 12px; margin-top: 14px; }
+  .sessions { display: flex; flex-direction: column; gap: 10px; max-height: 75vh; overflow: auto; }
+  .session { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+  .session .top { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+  .session .who { font-weight: 600; }
+  .status { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: var(--sys); color: var(--muted); white-space: nowrap; }
+  .status.completed, .status.delivered, .status.sent { background: var(--human); color: var(--ok); }
+  .status.in-progress, .status.ringing, .status.queued, .status.initiated { background: var(--ai); color: var(--accent); }
+  .status.failed, .status.busy, .status.no-answer { color: var(--bad); }
+  .events { margin-top: 8px; display: flex; flex-direction: column; gap: 5px; }
+  .ev { padding: 6px 9px; border-radius: 7px; font-size: 13px; }
+  .ev.ai { background: var(--ai); } .ev.human { background: var(--human); } .ev.system { background: var(--sys); color: var(--muted); font-size: 12px; }
+  .ev b { font-size: 11px; opacity: .7; margin-right: 6px; text-transform: uppercase; }
+  .empty { color: var(--muted); font-size: 13px; padding: 20px; text-align: center; }
+  .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: var(--text); color: var(--bg); padding: 10px 16px; border-radius: 8px; font-size: 13px; opacity: 0; transition: opacity .2s; pointer-events: none; }
+  .toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+<header>
+  <h1>AI Caller</h1>
+  <span class="hint" id="company"></span>
+  <div class="pipeline" id="pipeline"></div>
+</header>
+
+<main>
+  <!-- ---------------------------------------------------------------- people -->
+  <section class="panel">
+    <h2>Team</h2>
+    <input id="search" placeholder="Search people…">
+    <ul class="people" id="people"></ul>
+    <details>
+      <summary>+ Add person</summary>
+      <label>Name</label><input id="n-name">
+      <div class="row">
+        <div><label>Role</label><input id="n-role"></div>
+        <div><label>Department</label><input id="n-dept"></div>
+      </div>
+      <label>Phone (E.164, e.g. +14155551234)</label><input id="n-phone" placeholder="+1…">
+      <label>Language</label><input id="n-lang" value="English">
+      <label>Notes for the AI (optional)</label><input id="n-notes" placeholder="prefers mornings, on night shift…">
+      <div class="actions"><button class="btn" id="n-add">Add</button></div>
+    </details>
+  </section>
+
+  <!-- ---------------------------------------------------------------- compose -->
+  <section class="panel">
+    <h2>Outreach</h2>
+    <div class="target" id="target"><span class="hint">Select a person on the left.</span></div>
+
+    <label>Channel</label>
+    <div class="toggle">
+      <button id="ch-call" class="active">📞 Phone call</button>
+      <button id="ch-message">💬 Text message</button>
+    </div>
+
+    <label>What should the AI accomplish?</label>
+    <textarea id="intent" placeholder="e.g. Ask if they can cover the Saturday 8am shift for Omar. If yes, confirm they'll be at the north site. If no, ask which day next week works."></textarea>
+
+    <div class="row">
+      <div>
+        <label>Tone</label>
+        <select id="tone">
+          <option>friendly and professional</option>
+          <option>warm and casual</option>
+          <option>formal</option>
+          <option>brief and direct</option>
+          <option>empathetic and gentle</option>
+        </select>
+      </div>
+      <div>
+        <label>Supervisor name (how the AI refers to you)</label>
+        <input id="supervisor" placeholder="e.g. Layan">
+      </div>
+    </div>
+
+    <label id="script-label">Opening line (generated by the AI, edit freely)</label>
+    <textarea id="script" placeholder="Click “Generate preview” to draft what the AI will say first."></textarea>
+
+    <div class="actions">
+      <button class="btn" id="preview">✨ Generate preview</button>
+      <button class="btn primary" id="send" disabled>📞 Place call</button>
+      <span class="hint" id="sendhint"></span>
+    </div>
+  </section>
+
+  <!-- ---------------------------------------------------------------- activity -->
+  <section class="panel">
+    <h2>Activity &amp; live transcripts</h2>
+    <div class="sessions" id="sessions"><div class="empty">No calls or messages yet.</div></div>
+  </section>
+</main>
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let employees = [], selected = null, channel = 'call', cfg = {};
+
+// ---------- API layer. Set API_BASE to your backend (e.g. 'http://localhost:8000').
+// If the backend is unreachable the page runs in DEMO mode with in-memory mock data.
+const API_BASE = localStorage.getItem('apiBase') || (location.protocol === 'file:' ? 'http://localhost:8000' : '');
+let demo = false;
+
+const mock = {
+  employees: [
+    { id: 'e1', name: 'Amira Hassan', role: 'Field Technician', department: 'Operations', phone: '+10000000001', language: 'English', notes: '' },
+    { id: 'e2', name: 'Daniel Park', role: 'Sales Associate', department: 'Sales', phone: '+10000000002', language: 'English', notes: 'prefers mornings' },
+    { id: 'e3', name: 'Priya Nair', role: 'Nurse', department: 'Clinic', phone: '+10000000003', language: 'English', notes: '' },
+  ],
+  sessions: [],
+  handle(path, opts) {
+    const body = opts.body ? JSON.parse(opts.body) : null;
+    const emp = (id) => this.employees.find(e => e.id === id);
+    const first = (n) => n.split(' ')[0];
+    const now = () => new Date().toISOString();
+    if (path === '/api/config') return { openrouter: false, model: 'demo', kokoro: false, voice: '-', twilio: false, public_url: false, dry_run: true, company: 'Demo Co (no backend)' };
+    if (path === '/api/employees' && !opts.method) return this.employees;
+    if (path === '/api/employees' && opts.method === 'POST') { const e = { id: 'e' + Date.now(), ...body }; this.employees.push(e); return e; }
+    if (path.startsWith('/api/employees/') && opts.method === 'DELETE') { this.employees = this.employees.filter(e => e.id !== path.split('/').pop()); return null; }
+    if (path === '/api/preview') {
+      const e = emp(body.employee_id);
+      return { script: body.channel === 'call'
+        ? `Hi ${first(e.name)}, this is an AI assistant calling on behalf of ${body.supervisor_name}. ${body.intent.split(/[.!?]/)[0]}. Do you have a moment?`
+        : `Hi ${first(e.name)}, this is an AI assistant for ${body.supervisor_name}. ${body.intent.split(/[.!?]/)[0]}. Please reply to this message. Thanks!` };
+    }
+    if (path === '/api/call' || path === '/api/message') {
+      const e = emp(body.employee_id), isCall = path === '/api/call';
+      const script = body.script || this.handle('/api/preview', { body: JSON.stringify(body) }).script;
+      const s = { id: 's' + Date.now(), channel: isCall ? 'call' : 'message', employee: e, intent: body.intent, status: isCall ? 'ringing' : 'sent', created: now(),
+                  events: [{ t: now(), kind: 'system', text: 'DEMO: no backend connected' }, { t: now(), kind: 'ai', text: script }] };
+      this.sessions.unshift(s);
+      if (isCall) { // fake a short conversation
+        const steps = [['status', 'in-progress'], ['human', 'Yes, sure, that works for me.'], ['ai', `Great, thank you ${first(e.name)}. I'll let ${body.supervisor_name} know. Goodbye!`], ['status', 'completed']];
+        steps.forEach(([k, v], i) => setTimeout(() => { if (k === 'status') { s.status = v; s.events.push({ t: now(), kind: 'system', text: 'Call ' + v }); } else s.events.push({ t: now(), kind: k, text: v }); }, 2500 * (i + 1)));
+      }
+      return s;
+    }
+    if (path === '/api/sessions') return this.sessions;
+    throw new Error('unknown mock route ' + path);
+  },
+};
+
+const api = async (path, opts = {}) => {
+  if (demo) return mock.handle(path, opts);
+  try {
+    const r = await fetch(API_BASE + path, { headers: { 'Content-Type': 'application/json' }, ...opts });
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.statusText);
+    return r.status === 204 ? null : r.json();
+  } catch (e) {
+    if (e instanceof TypeError) { // network failure -> backend not running
+      demo = true; toast('Backend not reachable, running in demo mode.');
+      return mock.handle(path, opts);
+    }
+    throw e;
+  }
+};
+const toast = (msg) => { const t = $('toast'); t.textContent = msg; t.classList.add('show'); setTimeout(() => t.classList.remove('show'), 2600); };
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+// ---------- pipeline status
+async function loadConfig() {
+  cfg = await api('/api/config');
+  $('company').textContent = cfg.company;
+  const steps = [
+    ['Interface', true, 'this page'],
+    ['OpenRouter', cfg.openrouter, cfg.openrouter ? cfg.model : 'no key, canned replies'],
+    ['Kokoro', cfg.kokoro, cfg.kokoro ? `voice ${cfg.voice}` : 'not set, Twilio voice fallback'],
+    ['Twilio', cfg.twilio, cfg.twilio ? 'live' : 'DRY RUN'],
+    ['Public URL', cfg.public_url, cfg.public_url ? 'reachable' : 'set PUBLIC_BASE_URL'],
+  ];
+  $('pipeline').innerHTML = steps.map(([n, ok, d]) =>
+    `<span class="pill" title="${esc(d)}"><span class="dot ${ok ? 'on' : 'off'}"></span>${n}</span>`).join('<span style="align-self:center">→</span>');
+  $('sendhint').textContent = cfg.dry_run ? 'Dry run: nothing will actually be sent until Twilio is configured.' : '';
+}
+
+// ---------- people
+async function loadPeople() { employees = await api('/api/employees'); renderPeople(); }
+function renderPeople() {
+  const q = $('search').value.toLowerCase();
+  const list = employees.filter(e => [e.name, e.role, e.department].join(' ').toLowerCase().includes(q));
+  $('people').innerHTML = list.map(e => `
+    <li data-id="${e.id}" class="${selected?.id === e.id ? 'active' : ''}">
+      <div><div class="name">${esc(e.name)}</div><div class="sub">${esc(e.role)}${e.department ? ' · ' + esc(e.department) : ''}</div></div>
+      <button class="x" data-del="${e.id}" title="Remove">✕</button>
+    </li>`).join('') || '<div class="empty">No matches.</div>';
+}
+$('search').addEventListener('input', renderPeople);
+$('people').addEventListener('click', async (ev) => {
+  const del = ev.target.closest('[data-del]');
+  if (del) {
+    const e = employees.find(x => x.id === del.dataset.del);
+    if (del.dataset.confirm) { await api(`/api/employees/${e.id}`, { method: 'DELETE' }); if (selected?.id === e.id) select(null); await loadPeople(); }
+    else { del.dataset.confirm = '1'; del.textContent = 'sure?'; setTimeout(() => { delete del.dataset.confirm; del.textContent = '✕'; }, 2500); }
+    return;
+  }
+  const li = ev.target.closest('li[data-id]');
+  if (li) select(employees.find(e => e.id === li.dataset.id));
+});
+function select(e) {
+  selected = e; renderPeople(); $('script').value = '';
+  $('target').innerHTML = e
+    ? `<div class="name">${esc(e.name)}</div><div class="hint">${esc(e.role)} · ${esc(e.department)} · ${esc(e.phone)} · ${esc(e.language)}</div>${e.notes ? `<div class="hint">Notes: ${esc(e.notes)}</div>` : ''}`
+    : '<span class="hint">Select a person on the left.</span>';
+  updateSend();
+}
+$('n-add').addEventListener('click', async () => {
+  const body = { name: $('n-name').value.trim(), role: $('n-role').value.trim(), department: $('n-dept').value.trim(),
+                 phone: $('n-phone').value.trim(), language: $('n-lang').value.trim() || 'English', notes: $('n-notes').value.trim() };
+  if (!body.name || !/^\+\d{7,15}$/.test(body.phone)) return toast('Name and an E.164 phone number (+…) are required.');
+  const e = await api('/api/employees', { method: 'POST', body: JSON.stringify(body) });
+  ['n-name', 'n-role', 'n-dept', 'n-phone', 'n-notes'].forEach(id => $(id).value = '');
+  await loadPeople(); select(e); toast(`${e.name} added.`);
+});
+
+// ---------- compose
+function setChannel(c) {
+  channel = c;
+  $('ch-call').classList.toggle('active', c === 'call');
+  $('ch-message').classList.toggle('active', c === 'message');
+  $('script-label').textContent = c === 'call' ? 'Opening line (generated by the AI, edit freely)' : 'Message text (generated by the AI, edit freely)';
+  $('send').textContent = c === 'call' ? '📞 Place call' : '💬 Send message';
+  $('script').value = '';
+  updateSend();
+}
+$('ch-call').onclick = () => setChannel('call');
+$('ch-message').onclick = () => setChannel('message');
+$('intent').addEventListener('input', updateSend);
+function updateSend() { $('send').disabled = !(selected && $('intent').value.trim()); }
+
+const payload = () => ({
+  employee_id: selected.id, channel, intent: $('intent').value.trim(),
+  tone: $('tone').value, supervisor_name: $('supervisor').value.trim() || 'your supervisor',
+});
+
+$('preview').addEventListener('click', async () => {
+  if (!selected) return toast('Pick a person first.');
+  if (!$('intent').value.trim()) return toast('Describe what the AI should accomplish.');
+  $('preview').disabled = true; $('preview').textContent = 'Drafting…';
+  try { $('script').value = (await api('/api/preview', { method: 'POST', body: JSON.stringify(payload()) })).script; }
+  catch (e) { toast('Preview failed: ' + e.message); }
+  finally { $('preview').disabled = false; $('preview').textContent = '✨ Generate preview'; }
+});
+
+$('send').addEventListener('click', async () => {
+  const btn = $('send'); btn.disabled = true; const label = btn.textContent; btn.textContent = channel === 'call' ? 'Dialing…' : 'Sending…';
+  try {
+    const body = { ...payload(), script: $('script').value.trim() || null };
+    const s = await api(channel === 'call' ? '/api/call' : '/api/message', { method: 'POST', body: JSON.stringify(body) });
+    toast(channel === 'call' ? `Calling ${s.employee.name}… (${s.status})` : `Message to ${s.employee.name}: ${s.status}`);
+    await loadSessions();
+  } catch (e) { toast('Failed: ' + e.message); }
+  finally { btn.textContent = label; updateSend(); }
+});
+
+// ---------- activity
+async function loadSessions() {
+  const list = await api('/api/sessions');
+  if (!list.length) { $('sessions').innerHTML = '<div class="empty">No calls or messages yet.</div>'; return; }
+  $('sessions').innerHTML = list.map(s => `
+    <div class="session">
+      <div class="top">
+        <div><span class="who">${s.channel === 'call' ? '📞' : '💬'} ${esc(s.employee.name)}</span>
+             <span class="hint"> · ${new Date(s.created).toLocaleTimeString()}</span></div>
+        <span class="status ${esc(s.status)}">${esc(s.status)}</span>
+      </div>
+      <div class="hint" style="margin-top:4px">${esc(s.intent)}</div>
+      <div class="events">${s.events.map(e => `<div class="ev ${e.kind}"><b>${e.kind === 'ai' ? 'AI' : e.kind === 'human' ? esc(s.employee.name.split(' ')[0]) : 'sys'}</b>${esc(e.text)}</div>`).join('')}</div>
+    </div>`).join('');
+}
+
+loadConfig(); loadPeople(); loadSessions();
+setInterval(loadSessions, 3000);
+</script>
+</body>
+</html>
