@@ -36,9 +36,33 @@ canned previews all function, nothing is dialed.
 | Kokoro | Any OpenAI-compatible `/v1/audio/speech` server running Kokoro. Local: `docker run -p 8880:8880 ghcr.io/remsky/kokoro-fastapi-cpu:latest`. Hosted: DeepInfra (`KOKORO_MODEL=hexgrad/Kokoro-82M`) | `KOKORO_BASE_URL`, `KOKORO_API_KEY`, `KOKORO_MODEL`, `KOKORO_VOICE` |
 | Twilio | Account SID, auth token, a voice+SMS capable number | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER` |
 | Public URL | Twilio must reach your machine over HTTPS. Run `ngrok http 8000` and paste the https URL | `PUBLIC_BASE_URL` |
+| Supabase (optional) | A Supabase project: its URL and an API key. Stores the team and every call/SMS transcript in Postgres (see below) | `SUPABASE_URL`, `SUPABASE_KEY` |
 
 If Kokoro is down or unset, calls fall back to Twilio's built-in voice so the call
 still goes through.
+
+## Supabase (Postgres storage)
+
+Without `SUPABASE_URL`/`SUPABASE_KEY` the team lives in `data/employees.json` and
+sessions only in memory, which is fine for a single local server. With them set, the
+backend keeps employees and sessions in two Postgres tables, so transcripts survive
+restarts and the Twilio webhooks work with multiple workers.
+
+1. Create the tables. Either paste `supabase/migrations/20261019000000_init.sql` into
+   the SQL editor of your project, or link and push with the CLI:
+   ```powershell
+   npx supabase link --project-ref <your-project-ref>
+   npx supabase db push
+   ```
+   (`npx supabase start` + `npx supabase db reset` gives you a local stack with the
+   sample people from `supabase/seed.sql`.)
+2. Put the project URL and key in `.env`. The publishable key works; for a server a
+   secret key (`sb_secret_…`) is the better choice.
+3. Restart. The **Supabase** pill in the header turns green and the first request
+   seeds the three sample people if the table is empty.
+
+The migration enables row level security with a permissive policy for the API key,
+because the app has no login of its own yet. Tighten the policies when you add auth.
 
 ## How a call works
 
@@ -60,12 +84,14 @@ still goes through.
 
 - `backend/main.py` — API, OpenRouter + Kokoro + Twilio glue, Twilio webhooks
 - `frontend/index.html` — supervisor interface (vanilla JS, no build step)
-- `data/employees.json` — team list (auto-seeded with sample people)
+- `data/employees.json` — team list when Supabase is not configured (auto-seeded with sample people)
+- `supabase/migrations/` — Postgres schema for the `employees` and `sessions` tables; `supabase/seed.sql` sample data
 - `audio_cache/` — generated Kokoro mp3s served to Twilio
 
 ## Production notes
 
-- Sessions live in memory; move `SESSIONS` to Redis/Postgres for multiple workers.
+- Run with Supabase configured when you use more than one worker; without it sessions
+  live only in the memory of the process that created them.
 - Validate Twilio webhook signatures (`twilio.request_validator.RequestValidator`)
   before trusting `/twilio/*` requests.
 - Check local rules on AI-placed calls and recording consent. The system prompt

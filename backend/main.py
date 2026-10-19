@@ -22,6 +22,7 @@ from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
+from supabase import create_client
 from twilio.rest import Client as TwilioClient
 from twilio.twiml.voice_response import Gather, VoiceResponse
 
@@ -45,6 +46,9 @@ PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "").rstrip("/")  # ngrok https UR
 COMPANY_NAME = os.getenv("COMPANY_NAME", "the company")
 DRY_RUN = os.getenv("DRY_RUN", "0") == "1"  # no real Twilio traffic
 
+SUPABASE_URL = os.getenv("SUPABASE_URL", "").rstrip("/")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY", "")
+
 DATA_FILE = ROOT / "data" / "employees.json"
 AUDIO_DIR = ROOT / "audio_cache"
 AUDIO_DIR.mkdir(exist_ok=True)
@@ -54,6 +58,10 @@ twilio_client = (
     if TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN and not DRY_RUN
     else None
 )
+
+# Postgres via Supabase for employees + sessions (tables in supabase/migrations/).
+# Unset -> data/employees.json + in-memory sessions, as before.
+supabase = create_client(SUPABASE_URL, SUPABASE_KEY) if SUPABASE_URL and SUPABASE_KEY else None
 
 app = FastAPI(title="AI Caller")
 app.mount("/static", StaticFiles(directory=ROOT / "frontend"), name="static")
@@ -83,14 +91,22 @@ class SendRequest(PreviewRequest):
 
 
 # --------------------------------------------------------------------------- storage
+SEED_EMPLOYEES = [
+    Employee(name="Amira Hassan", role="Field Technician", department="Operations", phone="+10000000001"),
+    Employee(name="Daniel Park", role="Sales Associate", department="Sales", phone="+10000000002"),
+    Employee(name="Priya Nair", role="Nurse", department="Clinic", phone="+10000000003"),
+]
+
+
 def load_employees() -> list[Employee]:
+    if supabase:
+        rows = supabase.table("employees").select("*").order("created_at").execute().data
+        if not rows:
+            rows = [e.model_dump() for e in SEED_EMPLOYEES]
+            supabase.table("employees").insert(rows).execute()
+        return [Employee(**r) for r in rows]
     if not DATA_FILE.exists():
-        seed = [
-            Employee(name="Amira Hassan", role="Field Technician", department="Operations", phone="+10000000001"),
-            Employee(name="Daniel Park", role="Sales Associate", department="Sales", phone="+10000000002"),
-            Employee(name="Priya Nair", role="Nurse", department="Clinic", phone="+10000000003"),
-        ]
-        save_employees(seed)
+        save_employees(SEED_EMPLOYEES)
     return [Employee(**e) for e in json.loads(DATA_FILE.read_text(encoding="utf-8"))]
 
 
@@ -106,8 +122,25 @@ def get_employee(employee_id: str) -> Employee:
     raise HTTPException(404, "employee not found")
 
 
-# In-memory call/message sessions (swap for a DB in production)
+# Call/message sessions. In-process cache; when Supabase is configured every change is
+# upserted to the `sessions` table and unknown ids are fetched from it, so the Twilio
+# webhooks keep working across restarts and multiple workers.
 SESSIONS: dict[str, dict] = {}
+
+
+def persist(session: dict) -> None:
+    SESSIONS[session["id"]] = session
+    if supabase:
+        supabase.table("sessions").upsert(session).execute()
+
+
+def get_session(sid: str) -> dict | None:
+    session = SESSIONS.get(sid)
+    if session is None and supabase:
+        rows = supabase.table("sessions").select("*").eq("id", sid).limit(1).execute().data
+        if rows:
+            session = SESSIONS[sid] = rows[0]
+    return session
 
 
 def now() -> str:
@@ -116,6 +149,7 @@ def now() -> str:
 
 def log(session: dict, kind: str, text: str) -> None:
     session["events"].append({"t": now(), "kind": kind, "text": text})
+    persist(session)  # every state change in this app ends with a log line
 
 
 # --------------------------------------------------------------------------- OpenRouter
@@ -198,6 +232,7 @@ def config():
         "twilio": twilio_client is not None,
         "public_url": bool(PUBLIC_BASE_URL),
         "dry_run": DRY_RUN or twilio_client is None,
+        "supabase": supabase is not None,
         "company": COMPANY_NAME,
     }
 
@@ -209,6 +244,9 @@ def list_employees():
 
 @app.post("/api/employees")
 def add_employee(emp: Employee):
+    if supabase:
+        supabase.table("employees").insert(emp.model_dump()).execute()
+        return emp
     items = load_employees()
     items.append(emp)
     save_employees(items)
@@ -217,6 +255,9 @@ def add_employee(emp: Employee):
 
 @app.delete("/api/employees/{employee_id}")
 def delete_employee(employee_id: str):
+    if supabase:
+        supabase.table("employees").delete().eq("id", employee_id).execute()
+        return {"ok": True}
     items = [e for e in load_employees() if e.id != employee_id]
     save_employees(items)
     return {"ok": True}
@@ -242,7 +283,7 @@ async def send_message(req: SendRequest):
     sid = uuid.uuid4().hex[:10]
     session = {"id": sid, "channel": "message", "employee": emp.model_dump(), "intent": req.intent,
                "status": "queued", "created": now(), "events": []}
-    SESSIONS[sid] = session
+    persist(session)
     log(session, "ai", body)
     if twilio_client is None:
         session["status"] = "dry-run"
@@ -267,7 +308,7 @@ async def start_call(req: SendRequest):
                      {"role": "assistant", "content": opening}],
         "opening": opening, "opening_audio": None, "silences": 0,
     }
-    SESSIONS[sid] = session
+    persist(session)
     session["opening_audio"] = await tts(opening)  # pre-render so the callee hears no delay
     audio_state = "ready" if session["opening_audio"] else "unavailable, using Twilio Say"
     log(session, "system", f"Kokoro audio: {audio_state}")
@@ -296,6 +337,10 @@ async def start_call(req: SendRequest):
 
 @app.get("/api/sessions")
 def sessions():
+    if supabase:
+        return (supabase.table("sessions")
+                .select("id,channel,employee,intent,status,created,twilio_sid,events")
+                .order("created", desc=True).limit(200).execute().data)
     out = sorted(SESSIONS.values(), key=lambda s: s["created"], reverse=True)
     return [{k: v for k, v in s.items() if k != "messages"} for s in out]
 
@@ -320,7 +365,7 @@ def gather_for(sid: str) -> Gather:
 
 @app.post("/twilio/voice/{sid}")
 async def voice(sid: str, AnsweredBy: str = Form(default="")):
-    session = SESSIONS.get(sid)
+    session = get_session(sid)
     vr = VoiceResponse()
     if not session:
         vr.say("Sorry, this call session was not found. Goodbye.")
@@ -343,7 +388,7 @@ async def voice(sid: str, AnsweredBy: str = Form(default="")):
 
 @app.post("/twilio/gather/{sid}")
 async def gather(sid: str, request: Request, SpeechResult: str = Form(default="")):
-    session = SESSIONS.get(sid)
+    session = get_session(sid)
     vr = VoiceResponse()
     if not session:
         vr.hangup()
@@ -388,7 +433,7 @@ async def gather(sid: str, request: Request, SpeechResult: str = Form(default=""
 
 @app.post("/twilio/status/{sid}")
 async def status(sid: str, CallStatus: str = Form(default=""), CallDuration: str = Form(default="")):
-    session = SESSIONS.get(sid)
+    session = get_session(sid)
     if session:
         session["status"] = CallStatus
         suffix = f" ({CallDuration}s)" if CallDuration else ""

@@ -163,7 +163,7 @@ const mock = {
     const emp = (id) => this.employees.find(e => e.id === id);
     const first = (n) => n.split(' ')[0];
     const now = () => new Date().toISOString();
-    if (path === '/api/config') return { openrouter: false, model: 'demo', kokoro: false, voice: '-', twilio: false, public_url: false, dry_run: true, company: 'Demo Co (no backend)' };
+    if (path === '/api/config') return { openrouter: false, model: 'demo', kokoro: false, voice: '-', twilio: false, public_url: false, dry_run: true, supabase: false, company: 'Demo Co (no backend)' };
     if (path === '/api/employees' && !opts.method) return this.employees;
     if (path === '/api/employees' && opts.method === 'POST') { const e = { id: 'e' + Date.now(), ...body }; this.employees.push(e); return e; }
     if (path.startsWith('/api/employees/') && opts.method === 'DELETE') { this.employees = this.employees.filter(e => e.id !== path.split('/').pop()); return null; }
@@ -217,6 +217,7 @@ async function loadConfig() {
     ['Kokoro', cfg.kokoro, cfg.kokoro ? `voice ${cfg.voice}` : 'not set, Twilio voice fallback'],
     ['Twilio', cfg.twilio, cfg.twilio ? 'live' : 'DRY RUN'],
     ['Public URL', cfg.public_url, cfg.public_url ? 'reachable' : 'set PUBLIC_BASE_URL'],
+    ['Supabase', cfg.supabase, cfg.supabase ? 'employees + sessions in Postgres' : 'not set, JSON file + memory'],
   ];
   $('pipeline').innerHTML = steps.map(([n, ok, d]) =>
     `<span class="pill" title="${esc(d)}"><span class="dot ${ok ? 'on' : 'off'}"></span>${n}</span>`).join('<span style="align-self:center">→</span>');

@@ -2,3 +2,5 @@
 audio_cache/
 data/employees.json
 __pycache__/
+node_modules/
+.env.local

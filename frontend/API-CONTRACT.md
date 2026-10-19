@@ -11,7 +11,7 @@ If the backend is unreachable the page falls back to **demo mode** with mock dat
 
 | Method | Path | Request body | Response |
 |--------|------|--------------|----------|
-| GET | `/api/config` | – | `{ openrouter, kokoro, twilio, public_url, dry_run: bool, model, voice, company: string }` (drives the pipeline status pills in the header) |
+| GET | `/api/config` | – | `{ openrouter, kokoro, twilio, public_url, dry_run, supabase: bool, model, voice, company: string }` (drives the pipeline status pills in the header) |
 | GET | `/api/employees` | – | `Employee[]` |
 | POST | `/api/employees` | `Employee` without `id` | created `Employee` |
 | DELETE | `/api/employees/{id}` | – | anything / 204 |
