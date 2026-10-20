@@ -33,8 +33,10 @@ load_dotenv(ROOT / ".env")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "openai/gpt-4o-mini")
 
-KOKORO_BASE_URL = os.getenv("KOKORO_BASE_URL", "").rstrip("/")  # e.g. http://localhost:8880/v1
+KOKORO_BASE_URL = os.getenv("KOKORO_BASE_URL", "").rstrip("/")  # e.g. https://openrouter.ai/api/v1
 KOKORO_API_KEY = os.getenv("KOKORO_API_KEY", "")
+if not KOKORO_API_KEY and "openrouter.ai" in KOKORO_BASE_URL:
+    KOKORO_API_KEY = OPENROUTER_API_KEY  # same account serves text and speech
 KOKORO_MODEL = os.getenv("KOKORO_MODEL", "kokoro")
 KOKORO_VOICE = os.getenv("KOKORO_VOICE", "af_heart")
 

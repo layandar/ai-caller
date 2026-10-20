@@ -33,7 +33,7 @@ canned previews all function, nothing is dialed.
 | Step | What you need | Env vars |
 |------|---------------|----------|
 | OpenRouter | API key from openrouter.ai, any chat model id | `OPENROUTER_API_KEY`, `OPENROUTER_MODEL` |
-| Kokoro | Any OpenAI-compatible `/v1/audio/speech` server running Kokoro. Local: `docker run -p 8880:8880 ghcr.io/remsky/kokoro-fastapi-cpu:latest`. Hosted: DeepInfra (`KOKORO_MODEL=hexgrad/Kokoro-82M`) | `KOKORO_BASE_URL`, `KOKORO_API_KEY`, `KOKORO_MODEL`, `KOKORO_VOICE` |
+| Kokoro | Any OpenAI-compatible `/v1/audio/speech` server running Kokoro. Easiest: OpenRouter (`KOKORO_BASE_URL=https://openrouter.ai/api/v1`, `KOKORO_MODEL=hexgrad/kokoro-82m`, reuses `OPENROUTER_API_KEY`). Local: `docker run -p 8880:8880 ghcr.io/remsky/kokoro-fastapi-cpu:latest`. DeepInfra also hosts it (`hexgrad/Kokoro-82M`) | `KOKORO_BASE_URL`, `KOKORO_API_KEY`, `KOKORO_MODEL`, `KOKORO_VOICE` |
 | Twilio | Account SID, auth token, a voice+SMS capable number | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER` |
 | Public URL | Twilio must reach your machine over HTTPS. Run `ngrok http 8000` and paste the https URL | `PUBLIC_BASE_URL` |
 | Supabase (optional) | A Supabase project: its URL and an API key. Stores the team and every call/SMS transcript in Postgres (see below) | `SUPABASE_URL`, `SUPABASE_KEY` |
