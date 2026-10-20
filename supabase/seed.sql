@@ -1,7 +1,9 @@
--- Sample team for local development (`supabase db reset`). Same people the
--- backend seeds when the employees table is empty.
-insert into public.employees (id, name, role, department, phone, language, notes) values
-  ('seed0001', 'Amira Hassan', 'Field Technician', 'Operations', '+10000000001', 'English', ''),
-  ('seed0002', 'Daniel Park',  'Sales Associate',  'Sales',      '+10000000002', 'English', ''),
-  ('seed0003', 'Priya Nair',   'Nurse',            'Clinic',     '+10000000003', 'English', '')
-on conflict (id) do nothing;
+-- Sample team for an empty database (`supabase db reset`, or paste into the SQL
+-- editor). Only inserts when the table has no one in it.
+insert into public.employees (name, role, department, phone_number)
+select * from (values
+  ('Amira Hassan', 'Field Technician', 'Operations', '+10000000001'),
+  ('Daniel Park',  'Sales Associate',  'Sales',      '+10000000002'),
+  ('Priya Nair',   'Nurse',            'Clinic',     '+10000000003')
+) as v(name, role, department, phone_number)
+where not exists (select 1 from public.employees);

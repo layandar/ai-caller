@@ -2,14 +2,15 @@
 -- session with its live transcript. Mirrors Employee / Session in backend/main.py.
 
 create table if not exists public.employees (
-  id          text primary key,
-  name        text not null,
-  role        text not null default '',
-  department  text not null default '',
-  phone       text not null,                 -- E.164, e.g. +14155551234
-  language    text not null default 'English',
-  notes       text not null default '',
-  created_at  timestamptz not null default now()
+  id            uuid primary key default gen_random_uuid(),
+  created_at    timestamptz not null default now(),
+  name          text not null,
+  phone_number  text not null,                   -- E.164, e.g. +14155551234
+  department    text not null default '',
+  is_active     boolean not null default true,   -- "Remove" in the UI sets this false
+  role          text not null default '',
+  language      text not null default 'English',
+  notes         text not null default ''         -- hints for the AI about this person
 );
 
 create table if not exists public.sessions (
@@ -35,6 +36,8 @@ create index if not exists sessions_created_idx on public.sessions (created desc
 alter table public.employees enable row level security;
 alter table public.sessions  enable row level security;
 
+drop policy if exists "backend full access" on public.employees;
+drop policy if exists "backend full access" on public.sessions;
 create policy "backend full access" on public.employees
   for all to anon, authenticated using (true) with check (true);
 create policy "backend full access" on public.sessions

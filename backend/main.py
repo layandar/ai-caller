@@ -98,13 +98,30 @@ SEED_EMPLOYEES = [
 ]
 
 
+# Supabase `employees` table: uuid id, name, phone_number, department, is_active, plus
+# role / language / notes (see supabase/migrations/). The API keeps the Employee shape
+# (`phone`), so translate at this boundary. "Remove" in the UI is a soft delete.
+def employee_from_row(row: dict) -> Employee:
+    return Employee(id=row["id"], name=row.get("name") or "", role=row.get("role") or "",
+                    department=row.get("department") or "", phone=row.get("phone_number") or "",
+                    language=row.get("language") or "English", notes=row.get("notes") or "")
+
+
+def employee_to_row(emp: Employee) -> dict:
+    row = {"id": emp.id, "name": emp.name, "phone_number": emp.phone,
+           "department": emp.department, "is_active": True}
+    # Optional columns go only when set, so a table that lacks them still accepts the row.
+    for col, default in (("role", ""), ("language", "English"), ("notes", "")):
+        if getattr(emp, col) != default:
+            row[col] = getattr(emp, col)
+    return row
+
+
 def load_employees() -> list[Employee]:
     if supabase:
-        rows = supabase.table("employees").select("*").order("created_at").execute().data
-        if not rows:
-            rows = [e.model_dump() for e in SEED_EMPLOYEES]
-            supabase.table("employees").insert(rows).execute()
-        return [Employee(**r) for r in rows]
+        rows = (supabase.table("employees").select("*").eq("is_active", True)
+                .order("created_at").execute().data)
+        return [employee_from_row(r) for r in rows]
     if not DATA_FILE.exists():
         save_employees(SEED_EMPLOYEES)
     return [Employee(**e) for e in json.loads(DATA_FILE.read_text(encoding="utf-8"))]
@@ -245,7 +262,8 @@ def list_employees():
 @app.post("/api/employees")
 def add_employee(emp: Employee):
     if supabase:
-        supabase.table("employees").insert(emp.model_dump()).execute()
+        emp.id = str(uuid.uuid4())  # the table's id column is a uuid
+        supabase.table("employees").insert(employee_to_row(emp)).execute()
         return emp
     items = load_employees()
     items.append(emp)
@@ -256,7 +274,7 @@ def add_employee(emp: Employee):
 @app.delete("/api/employees/{employee_id}")
 def delete_employee(employee_id: str):
     if supabase:
-        supabase.table("employees").delete().eq("id", employee_id).execute()
+        supabase.table("employees").update({"is_active": False}).eq("id", employee_id).execute()
         return {"ok": True}
     items = [e for e in load_employees() if e.id != employee_id]
     save_employees(items)
