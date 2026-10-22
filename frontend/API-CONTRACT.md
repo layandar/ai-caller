@@ -16,6 +16,7 @@ If the backend is unreachable the page falls back to **demo mode** with mock dat
 | POST | `/api/employees` | `Employee` without `id` | created `Employee` |
 | DELETE | `/api/employees/{id}` | – | anything / 204 |
 | POST | `/api/preview` | `OutreachRequest` | `{ script: string }` – the AI's opening line (call) or SMS body (message) |
+| POST | `/api/tts` | `{ text: string }` | `{ url: string }` – path of an mp3 of `text` in the Kokoro voice (for the **Listen** button); 400 if Kokoro is not configured |
 | POST | `/api/call` | `OutreachRequest & { script?: string }` | `Session` |
 | POST | `/api/message` | `OutreachRequest & { script?: string }` | `Session` |
 | GET | `/api/sessions` | – | `Session[]`, newest first (polled every 3 s for the Activity panel) |

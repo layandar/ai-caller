@@ -23,11 +23,12 @@ from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from supabase import create_client
+from twilio.base.exceptions import TwilioRestException
 from twilio.rest import Client as TwilioClient
 from twilio.twiml.voice_response import Gather, VoiceResponse
 
 ROOT = Path(__file__).resolve().parent.parent
-load_dotenv(ROOT / ".env")
+load_dotenv(ROOT / ".env", override=True)  # .env wins, so edits apply on every restart/reload
 
 # --------------------------------------------------------------------------- config
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
@@ -90,6 +91,10 @@ class PreviewRequest(BaseModel):
 
 class SendRequest(PreviewRequest):
     script: str | None = None  # supervisor-edited opening line / SMS body
+
+
+class TtsRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=1000)
 
 
 # --------------------------------------------------------------------------- storage
@@ -208,9 +213,10 @@ async def llm(messages: list[dict], max_tokens: int = 220) -> str:
 
 
 # --------------------------------------------------------------------------- Kokoro TTS
-async def tts(text: str) -> str | None:
-    """Return a public URL to an mp3 of `text`, or None if Kokoro isn't configured/fails."""
-    if not KOKORO_BASE_URL or not PUBLIC_BASE_URL:
+async def synthesize(text: str) -> str | None:
+    """Render `text` with Kokoro into audio_cache. Returns the mp3 file name, or None if
+    Kokoro isn't configured or fails."""
+    if not KOKORO_BASE_URL:
         return None
     try:
         async with httpx.AsyncClient(timeout=60) as client:
@@ -222,10 +228,18 @@ async def tts(text: str) -> str | None:
             r.raise_for_status()
         name = f"{uuid.uuid4().hex}.mp3"
         (AUDIO_DIR / name).write_bytes(r.content)
-        return f"{PUBLIC_BASE_URL}/audio/{name}"
-    except Exception as exc:  # fall back to Twilio <Say>
+        return name
+    except Exception as exc:
         print("Kokoro TTS failed:", exc)
         return None
+
+
+async def tts(text: str) -> str | None:
+    """Public URL to an mp3 of `text` for Twilio to <Play>, or None (Twilio <Say> is used then)."""
+    if not PUBLIC_BASE_URL:
+        return None
+    name = await synthesize(text)
+    return f"{PUBLIC_BASE_URL}/audio/{name}" if name else None
 
 
 def speak(target: VoiceResponse | Gather, text: str, audio_url: str | None) -> None:
@@ -296,6 +310,20 @@ async def preview(req: PreviewRequest):
     return {"script": text.replace("[END]", "").strip()}
 
 
+@app.post("/api/tts")
+async def preview_audio(req: TtsRequest):
+    """Hear a line in the Kokoro voice in the browser, without placing a call."""
+    if not KOKORO_BASE_URL:
+        raise HTTPException(400, "Kokoro is not configured (set KOKORO_BASE_URL).")
+    text = req.text.strip()
+    if not text:
+        raise HTTPException(400, "Nothing to speak.")
+    name = await synthesize(text)
+    if not name:
+        raise HTTPException(502, "Kokoro could not render this text, see the server log.")
+    return {"url": f"/audio/{name}"}
+
+
 @app.post("/api/message")
 async def send_message(req: SendRequest):
     emp = get_employee(req.employee_id)
@@ -309,7 +337,12 @@ async def send_message(req: SendRequest):
         session["status"] = "dry-run"
         log(session, "system", "DRY RUN: SMS not sent (Twilio not configured).")
     else:
-        msg = twilio_client.messages.create(to=emp.phone, from_=TWILIO_FROM_NUMBER, body=body)
+        try:
+            msg = twilio_client.messages.create(to=emp.phone, from_=TWILIO_FROM_NUMBER, body=body)
+        except TwilioRestException as exc:
+            session["status"] = "failed"
+            log(session, "system", f"Twilio refused the SMS: {exc.msg}")
+            raise HTTPException(400, f"Twilio: {exc.msg}")
         session["status"] = msg.status
         session["twilio_sid"] = msg.sid
         log(session, "system", f"SMS {msg.sid} {msg.status}")
@@ -341,15 +374,27 @@ async def start_call(req: SendRequest):
     if not PUBLIC_BASE_URL:
         raise HTTPException(400, "PUBLIC_BASE_URL must be set (e.g. your ngrok https URL) so Twilio can reach this server.")
 
-    call = twilio_client.calls.create(
+    params = dict(
         to=emp.phone,
         from_=TWILIO_FROM_NUMBER,
         url=f"{PUBLIC_BASE_URL}/twilio/voice/{sid}",
         status_callback=f"{PUBLIC_BASE_URL}/twilio/status/{sid}",
         status_callback_event=["initiated", "ringing", "answered", "completed"],
         status_callback_method="POST",
-        machine_detection="Enable",
     )
+    try:
+        try:
+            call = twilio_client.calls.create(**params, machine_detection="Enable")
+        except TwilioRestException as exc:
+            if "parameter" not in (exc.msg or "").lower():
+                raise
+            # Trial accounts may not use answering-machine detection; call without it.
+            log(session, "system", "Voicemail detection unavailable on this Twilio account, calling without it")
+            call = twilio_client.calls.create(**params)
+    except TwilioRestException as exc:
+        session["status"] = "failed"
+        log(session, "system", f"Twilio refused the call: {exc.msg}")
+        raise HTTPException(400, f"Twilio: {exc.msg}")
     session["twilio_sid"] = call.sid
     log(session, "system", f"Call {call.sid} created")
     return session

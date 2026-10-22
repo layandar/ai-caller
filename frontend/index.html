@@ -129,9 +129,11 @@
 
     <div class="actions">
       <button class="btn" id="preview">✨ Generate preview</button>
+      <button class="btn" id="listen" title="Hear this line in the Kokoro voice">🔊 Listen</button>
       <button class="btn primary" id="send" disabled>📞 Place call</button>
       <span class="hint" id="sendhint"></span>
     </div>
+    <audio id="player" controls style="display:none; width:100%; margin-top:12px"></audio>
   </section>
 
   <!-- ---------------------------------------------------------------- activity -->
@@ -186,6 +188,7 @@ const mock = {
       return s;
     }
     if (path === '/api/sessions') return this.sessions;
+    if (path === '/api/tts') throw new Error('audio needs the backend (Kokoro)');
     throw new Error('unknown mock route ' + path);
   },
 };
@@ -222,6 +225,8 @@ async function loadConfig() {
   $('pipeline').innerHTML = steps.map(([n, ok, d]) =>
     `<span class="pill" title="${esc(d)}"><span class="dot ${ok ? 'on' : 'off'}"></span>${n}</span>`).join('<span style="align-self:center">→</span>');
   $('sendhint').textContent = cfg.dry_run ? 'Dry run: nothing will actually be sent until Twilio is configured.' : '';
+  $('listen').disabled = !cfg.kokoro;
+  $('listen').title = cfg.kokoro ? `Hear this line in the Kokoro voice (${cfg.voice})` : 'Set KOKORO_BASE_URL to enable';
 }
 
 // ---------- people
@@ -290,6 +295,18 @@ $('preview').addEventListener('click', async () => {
   try { $('script').value = (await api('/api/preview', { method: 'POST', body: JSON.stringify(payload()) })).script; }
   catch (e) { toast('Preview failed: ' + e.message); }
   finally { $('preview').disabled = false; $('preview').textContent = '✨ Generate preview'; }
+});
+
+$('listen').addEventListener('click', async () => {
+  const text = $('script').value.trim();
+  if (!text) return toast('Generate a preview or type a line first.');
+  const btn = $('listen'); btn.disabled = true; btn.textContent = 'Rendering…';
+  try {
+    const { url } = await api('/api/tts', { method: 'POST', body: JSON.stringify({ text }) });
+    const p = $('player'); p.src = API_BASE + url; p.style.display = 'block';
+    await p.play().catch(() => {}); // autoplay may be blocked, the controls are there anyway
+  } catch (e) { toast('Audio failed: ' + e.message); }
+  finally { btn.disabled = false; btn.textContent = '🔊 Listen'; }
 });
 
 $('send').addEventListener('click', async () => {
